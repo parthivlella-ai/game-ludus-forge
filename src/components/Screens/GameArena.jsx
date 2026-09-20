@@ -14,7 +14,8 @@ import { ArrowLeft, Pause, Play, Flame, Shield, CheckCircle, Sparkles } from 'lu
 export default function GameArena({
   level,
   onExitToLevels,
-  onOpenShop
+  onOpenShop,
+  onNextLevel
 }) {
   // Number of questions required for this level:
   // Easy (1-20): 3 questions
@@ -281,15 +282,24 @@ export default function GameArena({
   const handleNextLevel = () => {
     soundEngine.playClick();
     if (level < 60) {
-      challengeEngine.resetLevelSession(level + 1);
-      onExitToLevels();
+      const nextLvl = level + 1;
+      challengeEngine.resetLevelSession(nextLvl);
+      if (onNextLevel) {
+        onNextLevel(nextLvl);
+      } else if (onExitToLevels) {
+        onExitToLevels(nextLvl);
+      }
+    } else {
+      if (onExitToLevels) onExitToLevels(level);
     }
   };
 
   const handleExit = () => {
     soundEngine.playClick();
     challengeEngine.resetLevelSession(level);
-    onExitToLevels();
+    if (onExitToLevels) {
+      onExitToLevels(level);
+    }
   };
 
   const difficulty = challenge ? challenge.difficulty : (level <= 20 ? 'easy' : level <= 40 ? 'medium' : 'hard');

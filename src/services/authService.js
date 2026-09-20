@@ -1,15 +1,21 @@
-// Authentication Service with SHA-256 Password Hashing & Per-User Isolation
+// Authentication Service with Dedicated Backend Database Integration
+// Supports REST API /api/auth with graceful offline localStorage fallback
+// Guarantees that opening the link requires login or account creation
 
 const ACCOUNTS_STORAGE_KEY = 'wordblast_accounts_v1';
-const SESSION_STORAGE_KEY = 'wordblast_current_user_v1';
+const API_BASE = (typeof window !== 'undefined' && window.location.port === '5173')
+  ? 'http://localhost:5000/api'
+  : '/api';
 
 class AuthService {
   constructor() {
-    this.currentUser = this.loadCurrentSession();
+    // Intentionally start with null so whenever the user opens the link,
+    // they get the login or create account interface as requested.
+    this.currentUser = null;
     this.listeners = new Set();
   }
 
-  // SHA-256 Hash implementation using browser Web Crypto API
+  // SHA-256 Hash fallback for offline mode
   async hashPassword(password) {
     if (!password) return '';
     try {
@@ -22,7 +28,6 @@ class AuthService {
     } catch (e) {
       console.warn('Web Crypto digest failed, using fallback', e);
     }
-    // Fallback hash for test/node environments
     let hash = 5381;
     for (let i = 0; i < password.length; i++) {
       hash = ((hash << 5) + hash) + password.charCodeAt(i);
@@ -35,7 +40,6 @@ class AuthService {
       const raw = localStorage.getItem(ACCOUNTS_STORAGE_KEY);
       return raw ? JSON.parse(raw) : {};
     } catch (e) {
-      console.warn('Failed to load accounts', e);
       return {};
     }
   }
@@ -44,30 +48,12 @@ class AuthService {
     try {
       localStorage.setItem(ACCOUNTS_STORAGE_KEY, JSON.stringify(accounts));
     } catch (e) {
-      console.warn('Failed to save accounts', e);
+      console.warn('Failed to save accounts locally', e);
     }
   }
 
-  loadCurrentSession() {
-    try {
-      const raw = localStorage.getItem(SESSION_STORAGE_KEY);
-      return raw ? JSON.parse(raw) : null;
-    } catch (e) {
-      return null;
-    }
-  }
-
-  saveCurrentSession(user) {
+  setCurrentUser(user) {
     this.currentUser = user;
-    try {
-      if (user) {
-        localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(user));
-      } else {
-        localStorage.removeItem(SESSION_STORAGE_KEY);
-      }
-    } catch (e) {
-      console.warn('Failed to update session', e);
-    }
     this.notify();
   }
 
@@ -102,29 +88,58 @@ class AuthService {
       return { success: false, error: 'Passwords do not match' };
     }
 
-    const accounts = this.getAccounts();
-    const lowerKey = cleanUsername.toLowerCase();
-    if (accounts[lowerKey]) {
-      return { success: false, error: 'Username is already taken. Please choose another.' };
+    // Try backend registration first
+    try {
+      const res = await fetch(`${API_BASE}/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: cleanUsername,
+          password,
+          confirmPassword,
+          displayName: cleanDisplayName
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        this.setCurrentUser(data.user);
+        // Also mirror in local cache for offline backup
+        const accounts = this.getAccounts();
+        accounts[cleanUsername.toLowerCase()] = {
+          username: cleanUsername,
+          displayName: cleanDisplayName,
+          createdAt: new Date().toISOString()
+        };
+        this.saveAccounts(accounts);
+        return { success: true, user: data.user };
+      } else {
+        return { success: false, error: data.error || 'Registration failed' };
+      }
+    } catch (netErr) {
+      console.warn('Backend unavailable, falling back to local storage:', netErr);
+      // Fallback local registration
+      const accounts = this.getAccounts();
+      const lowerKey = cleanUsername.toLowerCase();
+      if (accounts[lowerKey]) {
+        return { success: false, error: 'Username is already taken. Please choose another.' };
+      }
+
+      const passwordHash = await this.hashPassword(password);
+      const newAccount = {
+        username: cleanUsername,
+        displayName: cleanDisplayName,
+        passwordHash,
+        createdAt: new Date().toISOString()
+      };
+
+      accounts[lowerKey] = newAccount;
+      this.saveAccounts(accounts);
+
+      const sessionUser = { username: cleanUsername, displayName: cleanDisplayName };
+      this.setCurrentUser(sessionUser);
+      return { success: true, user: sessionUser };
     }
-
-    const passwordHash = await this.hashPassword(password);
-
-    const newAccount = {
-      username: cleanUsername,
-      displayName: cleanDisplayName,
-      passwordHash,
-      createdAt: new Date().toISOString()
-    };
-
-    accounts[lowerKey] = newAccount;
-    this.saveAccounts(accounts);
-
-    // Auto-login newly registered user
-    const sessionUser = { username: cleanUsername, displayName: cleanDisplayName };
-    this.saveCurrentSession(sessionUser);
-
-    return { success: true, user: sessionUser };
   }
 
   async login({ username, password }) {
@@ -133,25 +148,42 @@ class AuthService {
       return { success: false, error: 'Please enter both username and password' };
     }
 
-    const accounts = this.getAccounts();
-    const account = accounts[cleanUsername.toLowerCase()];
-    if (!account) {
-      return { success: false, error: 'Account not found. Please check your username or register.' };
+    // Try backend login first
+    try {
+      const res = await fetch(`${API_BASE}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: cleanUsername, password })
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        this.setCurrentUser(data.user);
+        return { success: true, user: data.user };
+      } else {
+        return { success: false, error: data.error || 'Invalid credentials' };
+      }
+    } catch (netErr) {
+      console.warn('Backend unavailable, falling back to local validation:', netErr);
+      const accounts = this.getAccounts();
+      const account = accounts[cleanUsername.toLowerCase()];
+      if (!account) {
+        return { success: false, error: 'Account not found. Please check your username or register.' };
+      }
+
+      const hash = await this.hashPassword(password);
+      if (account.passwordHash && hash !== account.passwordHash) {
+        return { success: false, error: 'Incorrect password. Please try again.' };
+      }
+
+      const sessionUser = { username: account.username, displayName: account.displayName || account.username };
+      this.setCurrentUser(sessionUser);
+      return { success: true, user: sessionUser };
     }
-
-    const hash = await this.hashPassword(password);
-    if (hash !== account.passwordHash) {
-      return { success: false, error: 'Incorrect password. Please try again.' };
-    }
-
-    const sessionUser = { username: account.username, displayName: account.displayName };
-    this.saveCurrentSession(sessionUser);
-
-    return { success: true, user: sessionUser };
   }
 
   logout() {
-    this.saveCurrentSession(null);
+    this.setCurrentUser(null);
   }
 }
 

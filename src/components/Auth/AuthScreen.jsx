@@ -71,40 +71,6 @@ export default function AuthScreen({ onAuthenticated }) {
     }
   };
 
-  // One-click quick demo login
-  const handleQuickDemo = async () => {
-    setError('');
-    setLoading(true);
-    soundEngine.playClick();
-
-    const demoUser = 'Operative_' + Math.floor(100 + Math.random() * 900);
-    const result = await authService.register({
-      username: demoUser,
-      password: 'demopassword123',
-      confirmPassword: 'demopassword123',
-      displayName: demoUser
-    });
-
-    if (result.success) {
-      soundEngine.playFanfare();
-      setTransitioningUser(result.user);
-      setTimeout(() => {
-        completeAuth(result.user);
-      }, 400);
-    } else {
-      // If already registered, login
-      const logRes = await authService.login({
-        username: demoUser,
-        password: 'demopassword123'
-      });
-      if (logRes.success) {
-        completeAuth(logRes.user);
-      } else {
-        setError('Quick launch failed. Please create an account.');
-        setLoading(false);
-      }
-    }
-  };
 
   return (
     <div className="auth-viewport">
@@ -217,34 +183,21 @@ export default function AuthScreen({ onAuthenticated }) {
             ) : mode === 'LOGIN' ? (
               <>
                 <LogIn size={18} />
-                <span>INFILTRATE ARENA</span>
+                <span>LOGIN TO ARENA</span>
               </>
             ) : (
               <>
                 <UserPlus size={18} />
-                <span>INITIALIZE OPERATIVE</span>
+                <span>CREATE ACCOUNT</span>
               </>
             )}
           </button>
         </form>
 
-        {/* Quick Launch Button */}
-        <div style={{ width: '100%', margin: '0.9rem 0 0.4rem' }}>
-          <button
-            type="button"
-            className="quick-demo-btn"
-            onClick={handleQuickDemo}
-            disabled={loading}
-          >
-            <Zap size={16} color="#00f59b" />
-            <span>INSTANT DEMO ACCESS (ONE-CLICK)</span>
-          </button>
-        </div>
-
-        <p style={{ marginTop: '0.8rem', fontSize: '0.8rem', color: 'var(--text-dim)' }}>
+        <p style={{ marginTop: '1.2rem', fontSize: '0.85rem', color: 'var(--text-dim)' }}>
           {mode === 'LOGIN' ? (
             <>
-              New Operative?{' '}
+              New Player?{' '}
               <span
                 style={{ color: '#00f59b', cursor: 'pointer', fontWeight: 800 }}
                 onClick={() => { setMode('REGISTER'); setError(''); }}
@@ -254,7 +207,7 @@ export default function AuthScreen({ onAuthenticated }) {
             </>
           ) : (
             <>
-              Existing Agent?{' '}
+              Already have an account?{' '}
               <span
                 style={{ color: '#00f59b', cursor: 'pointer', fontWeight: 800 }}
                 onClick={() => { setMode('LOGIN'); setError(''); }}

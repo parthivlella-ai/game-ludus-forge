@@ -9,7 +9,7 @@ export default function ShopModal({ isOpen, onClose, inkTokens, inventory, onBuy
     {
       id: 'freeze',
       name: 'FREEZE FRAME',
-      cost: 50,
+      cost: 1500,
       icon: <Snowflake size={24} color="#38bdf8" />,
       desc: 'Freezes the ticking bomb for 3 seconds.',
       owned: inventory.freeze || 0
@@ -17,7 +17,7 @@ export default function ShopModal({ isOpen, onClose, inkTokens, inventory, onBuy
     {
       id: 'rewind',
       name: 'TIME REWIND',
-      cost: 100,
+      cost: 2000,
       icon: <Rewind size={24} color="#a855f7" />,
       desc: 'Instantly restores +3 seconds to your timer.',
       owned: inventory.rewind || 0
@@ -25,7 +25,7 @@ export default function ShopModal({ isOpen, onClose, inkTokens, inventory, onBuy
     {
       id: 'lens',
       name: 'TRUTH LENS',
-      cost: 80,
+      cost: 1200,
       icon: <Eye size={24} color="#34d399" />,
       desc: 'Reveals a vital hint or bypasses sensory blackout.',
       owned: inventory.lens || 0
@@ -33,7 +33,7 @@ export default function ShopModal({ isOpen, onClose, inkTokens, inventory, onBuy
     {
       id: 'shield',
       name: 'BLAST SHIELD',
-      cost: 120,
+      cost: 2500,
       icon: <Shield size={24} color="#f59e0b" />,
       desc: 'Absorbs one full bomb explosion without failing.',
       owned: inventory.shield || 0
@@ -41,7 +41,7 @@ export default function ShopModal({ isOpen, onClose, inkTokens, inventory, onBuy
     {
       id: 'potato',
       name: 'HOT POTATO',
-      cost: 90,
+      cost: 1800,
       icon: <Flame size={24} color="#f97316" />,
       desc: 'Swaps the active bomb or passes it to another player.',
       owned: inventory.potato || 0
@@ -49,7 +49,7 @@ export default function ShopModal({ isOpen, onClose, inkTokens, inventory, onBuy
     {
       id: 'smoke',
       name: 'TYPO SMOKE',
-      cost: 70,
+      cost: 1000,
       icon: <Wind size={24} color="#ec4899" />,
       desc: 'Disorients opponent arena in multiplayer mode.',
       owned: inventory.smoke || 0

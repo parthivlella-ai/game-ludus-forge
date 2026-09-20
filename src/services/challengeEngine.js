@@ -1,5 +1,6 @@
 import { CHALLENGES_DATABASE, generateProceduralChallenge } from '../data/challenges.js';
 import { isValidEnglishWord } from '../data/dictionary.js';
+import { progressionManager } from './progressionManager.js';
 
 class ChallengeEngine {
   constructor() {
@@ -36,6 +37,8 @@ class ChallengeEngine {
     const used = this.getUsedIdsForLevel(level);
     used.add(challengeId);
     this.currentChallengeId = challengeId;
+    // Permanently record in user profile database
+    progressionManager.recordSeenQuestion(challengeId);
   }
 
   markChallengeFailed(level, challengeId) {
@@ -45,28 +48,42 @@ class ChallengeEngine {
     this.lastFailedId = challengeId;
   }
 
-  // Mandatory: Select a guaranteed DIFFERENT challenge for this level on retry
+  // Mandatory: Guaranteed non-repeating challenge across user history
   getNextChallenge(level) {
     const usedSet = this.getUsedIdsForLevel(level);
+    const difficulty = level <= 20 ? 'easy' : level <= 40 ? 'medium' : 'hard';
     const allForLevel = CHALLENGES_DATABASE.filter(c => c.level === level);
 
-    // 1. Filter out all challenges already used in this session, especially the last failed one
-    let available = allForLevel.filter(c => !usedSet.has(c.id) && c.id !== this.lastFailedId);
+    // 1. Primary: Unseen challenges for this specific level
+    let available = allForLevel.filter(c =>
+      !usedSet.has(c.id) &&
+      c.id !== this.lastFailedId &&
+      !progressionManager.isQuestionSeen(c.id)
+    );
 
-    // 2. If pool for this level is exhausted in this session, reset usedSet for this level but keep lastFailedId excluded
+    // 2. If all challenges for this level were already seen, expand to unseen questions in same difficulty tier (1000+ pool)
     if (available.length === 0) {
-      usedSet.clear();
-      available = allForLevel.filter(c => c.id !== this.lastFailedId);
+      available = CHALLENGES_DATABASE.filter(c =>
+        c.difficulty === difficulty &&
+        !usedSet.has(c.id) &&
+        c.id !== this.lastFailedId &&
+        !progressionManager.isQuestionSeen(c.id)
+      );
     }
 
-    // 3. If still empty, procedural fallback guaranteed unique
+    // 3. If the entire 1,000+ pool has been played, fallback to any unseen in current session
+    if (available.length === 0) {
+      available = allForLevel.filter(c => !usedSet.has(c.id) && c.id !== this.lastFailedId);
+    }
+
+    // 4. Guaranteed procedural fallback if exhausted
     if (available.length === 0) {
       const proc = generateProceduralChallenge(level, usedSet.size + 1);
       this.markChallengeUsed(level, proc.id);
       return proc;
     }
 
-    // Pick random from available
+    // Pick a random question from available
     const randomIndex = Math.floor(Math.random() * available.length);
     const chosen = available[randomIndex];
     this.markChallengeUsed(level, chosen.id);

@@ -1,13 +1,17 @@
 // Progression, Storage, Economy, and Achievements Manager
-// Isolated per user account
+// Synchronized with dedicated backend database per user account
 import { authService } from './authService.js';
+
+const API_BASE = (typeof window !== 'undefined' && window.location.port === '5173')
+  ? 'http://localhost:5000/api'
+  : '/api';
 
 const INITIAL_ACHIEVEMENTS = [
   { id: 'first_boom', name: 'First Explosion', desc: 'Survive your first challenge or explosion', icon: '💣', unlocked: false },
   { id: 'speed_demon', name: 'Speed Demon', desc: 'Answer with more than 70% time remaining', icon: '⚡', unlocked: false },
   { id: 'streak_fire', name: 'On Fire', desc: 'Achieve a 5-answer winning streak', icon: '🔥', unlocked: false },
   { id: 'brain_burner', name: 'Brain Burner', desc: 'Complete a Hard level challenge', icon: '🧠', unlocked: false },
-  { id: 'ink_collector', name: 'Ink Collector', desc: 'Accumulate 500 total Ink Tokens', icon: '🪙', unlocked: false },
+  { id: 'ink_collector', name: 'Ink Collector', desc: 'Accumulate 1,000 total Ink Tokens', icon: '🪙', unlocked: false },
   { id: 'puzzle_master', name: 'Puzzle Master', desc: 'Complete 20 total levels', icon: '🧩', unlocked: false },
   { id: 'shopaholic', name: 'Gadget Freak', desc: 'Purchase any power-up from the shop', icon: '🛍️', unlocked: false },
   { id: 'time_bender', name: 'Time Bender', desc: 'Use Freeze Frame or Time Rewind power-up', icon: '⏳', unlocked: false },
@@ -22,13 +26,14 @@ const DEFAULT_STATE = {
   completedLevels: {}, // { [levelNum]: { stars: 3, bestScore: 1200 } }
   totalScore: 0,
   bestScore: 0,
-  inkTokens: 150, // Starter ink
+  inkTokens: 50, // Fair starter ink
   inventory: {
-    freeze: 2,
-    rewind: 2,
-    shield: 1,
-    lens: 2,
-    potato: 1
+    freeze: 0,
+    rewind: 0,
+    shield: 0,
+    lens: 0,
+    potato: 0,
+    smoke: 0
   },
   achievements: INITIAL_ACHIEVEMENTS,
   stats: {
@@ -39,24 +44,34 @@ const DEFAULT_STATE = {
     powerupsUsed: 0,
     totalWins: 0,
     totalAttempts: 0
-  }
+  },
+  seenQuestionIds: []
 };
 
 class ProgressionManager {
   constructor() {
     this.currentUsername = this.getActiveUsername();
-    this.state = this.loadForUser(this.currentUsername);
+    this.state = this.loadLocalForUser(this.currentUsername);
     this.listeners = new Set();
+    this.syncTimeout = null;
 
     // Listen to user authentication changes
     authService.subscribe((user) => {
       const newUsername = user ? user.username : null;
       if (newUsername !== this.currentUsername) {
         this.currentUsername = newUsername;
-        this.state = this.loadForUser(this.currentUsername);
-        this.notify();
+        if (newUsername) {
+          this.fetchFromBackend(newUsername);
+        } else {
+          this.state = JSON.parse(JSON.stringify(DEFAULT_STATE));
+          this.notify();
+        }
       }
     });
+
+    if (this.currentUsername) {
+      this.fetchFromBackend(this.currentUsername);
+    }
   }
 
   getActiveUsername() {
@@ -69,7 +84,7 @@ class ProgressionManager {
     return `wordblast_progression_user_${userKey}`;
   }
 
-  loadForUser(username) {
+  loadLocalForUser(username) {
     try {
       const key = this.getStorageKey(username);
       const data = localStorage.getItem(key);
@@ -80,6 +95,7 @@ class ProgressionManager {
           ...parsed,
           inventory: { ...DEFAULT_STATE.inventory, ...(parsed.inventory || {}) },
           stats: { ...DEFAULT_STATE.stats, ...(parsed.stats || {}) },
+          seenQuestionIds: Array.isArray(parsed.seenQuestionIds) ? parsed.seenQuestionIds : [],
           achievements: INITIAL_ACHIEVEMENTS.map(ach => {
             const existing = (parsed.achievements || []).find(a => a.id === ach.id);
             return existing ? { ...ach, unlocked: existing.unlocked } : ach;
@@ -87,12 +103,46 @@ class ProgressionManager {
         };
       }
     } catch (e) {
-      console.warn('LocalStorage load failed, using default state', e);
+      console.warn('Local load failed, using default state', e);
     }
     return JSON.parse(JSON.stringify(DEFAULT_STATE));
   }
 
+  async fetchFromBackend(username) {
+    if (!username) return;
+    try {
+      const res = await fetch(`${API_BASE}/gameplay/${username}`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.gameplay) {
+          const remote = json.gameplay;
+          this.state = {
+            ...DEFAULT_STATE,
+            ...remote,
+            inventory: { ...DEFAULT_STATE.inventory, ...(remote.inventory || {}) },
+            stats: { ...DEFAULT_STATE.stats, ...(remote.stats || {}) },
+            seenQuestionIds: Array.isArray(remote.seenQuestionIds) ? remote.seenQuestionIds : [],
+            achievements: INITIAL_ACHIEVEMENTS.map(ach => {
+              const existing = (remote.achievements || []).find(a => a.id === ach.id);
+              return existing ? { ...ach, unlocked: existing.unlocked } : ach;
+            })
+          };
+          // Cache locally
+          const key = this.getStorageKey(username);
+          localStorage.setItem(key, JSON.stringify(this.state));
+          this.notify();
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('Could not sync with backend on load, using local cache:', err);
+    }
+    this.state = this.loadLocalForUser(username);
+    this.notify();
+  }
+
   save() {
+    // 1. Save locally immediately
     try {
       const key = this.getStorageKey(this.currentUsername);
       localStorage.setItem(key, JSON.stringify(this.state));
@@ -100,6 +150,38 @@ class ProgressionManager {
       console.warn('LocalStorage save failed', e);
     }
     this.notify();
+
+    // 2. Debounced save to backend database
+    if (this.currentUsername) {
+      if (this.syncTimeout) clearTimeout(this.syncTimeout);
+      this.syncTimeout = setTimeout(async () => {
+        try {
+          await fetch(`${API_BASE}/gameplay/${this.currentUsername}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(this.state)
+          });
+        } catch (err) {
+          console.warn('Backend sync failed, saved in local cache:', err);
+        }
+      }, 500);
+    }
+  }
+
+  recordSeenQuestion(questionId) {
+    if (!questionId) return;
+    if (!this.state.seenQuestionIds) {
+      this.state.seenQuestionIds = [];
+    }
+    if (!this.state.seenQuestionIds.includes(questionId)) {
+      this.state.seenQuestionIds.push(questionId);
+      this.save();
+    }
+  }
+
+  isQuestionSeen(questionId) {
+    if (!this.state.seenQuestionIds) return false;
+    return this.state.seenQuestionIds.includes(questionId);
   }
 
   subscribe(listener) {
@@ -167,7 +249,7 @@ class ProgressionManager {
 
   addInk(amount) {
     this.state.inkTokens = Math.max(0, this.state.inkTokens + amount);
-    if (this.state.inkTokens >= 500) {
+    if (this.state.inkTokens >= 1000) {
       this.unlockAchievement('ink_collector');
     }
     this.save();
@@ -218,7 +300,7 @@ class ProgressionManager {
     const ach = this.state.achievements.find(a => a.id === id);
     if (ach && !ach.unlocked) {
       ach.unlocked = true;
-      this.addInk(50); // Achievement reward
+      this.addInk(100); // Achievement reward
       this.save();
       return true;
     }

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Lock, Star, Sparkles, Zap, Brain, HelpCircle } from 'lucide-react';
 import { soundEngine } from '../../services/soundEngine.js';
 
@@ -6,37 +6,50 @@ export default function LevelSelectScreen({
   unlockedLevel,
   completedLevels,
   onSelectLevel,
-  onBack
+  onBack,
+  initialZone,
+  currentLevel
 }) {
-  const [activeZone, setActiveZone] = useState('easy'); // 'easy' | 'medium' | 'hard'
+  const getZoneForLevel = (lvl) => (lvl <= 20 ? 'easy' : lvl <= 40 ? 'medium' : 'hard');
+  const [activeZone, setActiveZone] = useState(() => {
+    if (initialZone) return initialZone;
+    if (currentLevel) return getZoneForLevel(currentLevel);
+    return getZoneForLevel(unlockedLevel || 1);
+  });
+
+  useEffect(() => {
+    if (initialZone) {
+      setActiveZone(initialZone);
+    }
+  }, [initialZone]);
 
   const zoneMetadata = {
     easy: {
       start: 1,
       end: 20,
-      title: '🟢 EASY: WORD BLAST',
-      desc: '3 Words per Level • Pure Word Constraints • 10–15s Timers',
+      title: '🟢 SECTOR ALPHA // WORD MATRIX',
+      desc: '3 Sub-Locks per Core • Dynamic Lexical Defense • 10–15s Clock',
       themeClass: 'zone-easy',
       accentColor: '#10b981',
-      icon: <Zap size={18} />
+      icon: <Zap size={20} />
     },
     medium: {
       start: 21,
       end: 40,
-      title: '🟡 MEDIUM: PUZZLE BLAST',
-      desc: '2 Puzzles per Level • Math & Logic Deduction • 15–20s Timers',
+      title: '🟡 SECTOR BETA // LOGIC DYNAMO',
+      desc: '2 Advanced Locks per Core • Mental Math, Algebra & Complex Sequences • 15–20s Clock',
       themeClass: 'zone-medium',
       accentColor: '#f59e0b',
-      icon: <Brain size={18} />
+      icon: <Brain size={20} />
     },
     hard: {
       start: 41,
       end: 60,
-      title: '🔴 HARD: RIDDLE / TRICK CHAMBER',
-      desc: '1 Riddle per Level • Lateral Brain Teasers • 30s Fixed Timer',
+      title: '🔴 SECTOR OMEGA // VOID SINGULARITY',
+      desc: '1 Lethal Core Lock • Lateral Trick Questions & Cryptic Enigmas • 30s Fixed Clock',
       themeClass: 'zone-hard',
       accentColor: '#ef4444',
-      icon: <HelpCircle size={18} />
+      icon: <HelpCircle size={20} />
     }
   };
 
@@ -125,7 +138,7 @@ export default function LevelSelectScreen({
       <div className="levels-path-grid">
         {levelsInZone.map((lvl) => {
           const isUnlocked = lvl <= unlockedLevel;
-          const isCurrentActive = lvl === unlockedLevel;
+          const isCurrentActive = lvl === (currentLevel || unlockedLevel);
           const completion = completedLevels[lvl];
           const stars = completion ? completion.stars : 0;
           const bestScore = completion ? completion.bestScore : 0;

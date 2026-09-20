@@ -8,7 +8,6 @@ import ShopModal from './components/Modals/ShopModal.jsx';
 import AchievementsModal from './components/Modals/AchievementsModal.jsx';
 import SettingsModal from './components/Modals/SettingsModal.jsx';
 import HowToPlayModal from './components/Modals/HowToPlayModal.jsx';
-import DevDrawer from './components/DevDrawer.jsx';
 import { authService } from './services/authService.js';
 import { progressionManager } from './services/progressionManager.js';
 import { particleEngine } from './services/particleEngine.js';
@@ -22,9 +21,12 @@ export default function App() {
   // Current logged in user
   const [currentUser, setCurrentUser] = useState(authService.getCurrentUser());
 
+  const getZoneForLevel = (lvl) => (lvl <= 20 ? 'easy' : lvl <= 40 ? 'medium' : 'hard');
+
   // Screen router: 'AUTH' | 'HOME' | 'LEVEL_SELECT' | 'GAME_ARENA'
-  const [screen, setScreen] = useState(() => (authService.getCurrentUser() ? 'HOME' : 'AUTH'));
+  const [screen, setScreen] = useState('AUTH');
   const [selectedLevel, setSelectedLevel] = useState(1);
+  const [targetZone, setTargetZone] = useState(() => getZoneForLevel(1));
 
   // Player progression state
   const [playerState, setPlayerState] = useState(progressionManager.getState());
@@ -76,7 +78,20 @@ export default function App() {
 
   const handleStartLevel = (lvl) => {
     setSelectedLevel(lvl);
+    setTargetZone(getZoneForLevel(lvl));
     setScreen('GAME_ARENA');
+  };
+
+  const handleNextLevel = (nextLvl) => {
+    setSelectedLevel(nextLvl);
+    setTargetZone(getZoneForLevel(nextLvl));
+    setScreen('GAME_ARENA');
+  };
+
+  const handleExitToLevels = (lvl) => {
+    const activeLvl = lvl || selectedLevel;
+    setTargetZone(getZoneForLevel(activeLvl));
+    setScreen('LEVEL_SELECT');
   };
 
   // If user not authenticated, display the Auth / Welcome screen
@@ -145,6 +160,8 @@ export default function App() {
           <LevelSelectScreen
             unlockedLevel={playerState.unlockedLevel}
             completedLevels={playerState.completedLevels}
+            initialZone={targetZone}
+            currentLevel={selectedLevel}
             onSelectLevel={handleStartLevel}
             onBack={() => setScreen('HOME')}
           />
@@ -153,7 +170,8 @@ export default function App() {
         {screen === 'GAME_ARENA' && (
           <GameArena
             level={selectedLevel}
-            onExitToLevels={() => setScreen('LEVEL_SELECT')}
+            onExitToLevels={handleExitToLevels}
+            onNextLevel={handleNextLevel}
             onOpenShop={() => setShowShop(true)}
           />
         )}
@@ -189,25 +207,6 @@ export default function App() {
       <HowToPlayModal
         isOpen={showHowToPlay}
         onClose={() => setShowHowToPlay(false)}
-      />
-
-      {/* Dev / Testing Drawer */}
-      <DevDrawer
-        currentLevel={selectedLevel}
-        onJumpToLevel={(lvl) => {
-          setSelectedLevel(lvl);
-          setScreen('GAME_ARENA');
-        }}
-        onTriggerWin={() => {
-          progressionManager.completeLevel(selectedLevel, 500, 3);
-        }}
-        onTriggerFail={() => {
-          soundEngine.playExplosion();
-          particleEngine.createExplosion(window.innerWidth / 2, window.innerHeight / 2, 80);
-          particleEngine.triggerScreenShake('heavy');
-        }}
-        onForceModifier={() => {}}
-        activeChallenge={{ id: `dev_lvl_${selectedLevel}` }}
       />
     </div>
   );
