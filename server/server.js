@@ -173,6 +173,6 @@ if (fs.existsSync(distPath)) {
 }
 
 // Start Server
-app.listen(PORT, () => {
-  console.log(`WordBlast backend server running on port ${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`WordBlast backend server running on port ${PORT} (0.0.0.0)`);
 });
