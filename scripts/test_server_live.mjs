@@ -49,6 +49,26 @@ setTimeout(async () => {
     const saveData = await saveRes.json();
     console.log('API /api/gameplay/:username save response:', saveData);
 
+    // Test leaderboard endpoint
+    const leadRes = await fetch('http://localhost:5000/api/leaderboard');
+    const leadData = await leadRes.json();
+    console.log('API /api/leaderboard response count:', leadData.leaderboard?.length);
+    if (!leadData.success || !Array.isArray(leadData.leaderboard)) {
+      throw new Error('Leaderboard endpoint test failed');
+    }
+
+    // Test daily challenge completion
+    const dailyRes = await fetch('http://localhost:5000/api/daily-challenge/LiveTester/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ score: 650, reward: 150 })
+    });
+    const dailyData = await dailyRes.json();
+    console.log('API /api/daily-challenge complete response:', dailyData.success);
+    if (!dailyData.success) {
+      throw new Error('Daily challenge complete endpoint test failed');
+    }
+
     console.log('SUCCESS: All endpoints verified working on live server!');
     serverProcess.kill();
     process.exit(0);

@@ -339,6 +339,68 @@ class ProgressionManager {
       totalAchievements: this.state.achievements.length
     };
   }
+
+  // ================= Daily Challenge Helpers =================
+  isDailyCompleted(dateStr) {
+    const today = dateStr || new Date().toISOString().slice(0, 10);
+    return !!(this.state.dailyCompletions && this.state.dailyCompletions[today]?.completed);
+  }
+
+  getDailyInfo(dateStr) {
+    const today = dateStr || new Date().toISOString().slice(0, 10);
+    return (this.state.dailyCompletions && this.state.dailyCompletions[today]) || null;
+  }
+
+  async completeDailyChallenge(dateStr, score, reward = 150) {
+    const today = dateStr || new Date().toISOString().slice(0, 10);
+    if (!this.state.dailyCompletions) this.state.dailyCompletions = {};
+
+    this.state.dailyCompletions[today] = {
+      completed: true,
+      score,
+      completedAt: new Date().toISOString()
+    };
+    this.state.totalScore += score;
+    this.state.inkTokens += reward;
+    this.save();
+
+    // Sync to backend if logged in
+    if (this.currentUsername) {
+      try {
+        await fetch(`${API_BASE}/daily-challenge/${this.currentUsername}/complete`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dateStr: today, score, reward })
+        });
+      } catch (e) {
+        console.warn('Daily sync failed, saved locally:', e);
+      }
+    }
+  }
+
+  async fetchLeaderboard() {
+    try {
+      const res = await fetch(`${API_BASE}/leaderboard`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.leaderboard)) {
+          return json.leaderboard;
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to fetch remote leaderboard, using local fallback:', e);
+    }
+    // Safe local fallback (current player only, no fake data)
+    return [{
+      username: this.currentUsername || 'Player',
+      displayName: this.currentUsername || 'Player',
+      totalScore: this.state.totalScore,
+      bestScore: this.state.bestScore,
+      unlockedLevel: this.state.unlockedLevel,
+      highestStreak: this.state.stats.highestStreak || 0,
+      completedCount: this.getCompletedLevelsCount()
+    }];
+  }
 }
 
 export const progressionManager = new ProgressionManager();

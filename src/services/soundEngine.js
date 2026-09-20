@@ -352,6 +352,121 @@ class SoundEngine {
       console.warn('Audio playClick error', e);
     }
   }
+
+  // Countdown warning beep (escalating frequency at 3, 2, 1)
+  playWarningBeep(secondsLeft) {
+    this.init();
+    if (this.muted || !this.ctx) return;
+    try {
+      const master = this.getMasterGain();
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      const now = this.ctx.currentTime;
+
+      // Higher pitch as time runs down
+      const freq = secondsLeft <= 1 ? 1600 : secondsLeft <= 2 ? 1200 : 900;
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(freq, now);
+
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+
+      osc.connect(gain);
+      gain.connect(master);
+      osc.start(now);
+      osc.stop(now + 0.09);
+    } catch (e) {
+      console.warn('Audio playWarningBeep error', e);
+    }
+  }
+
+  // Streak combo escalation sound (musical ascending chime)
+  playStreakCombo(streak = 1) {
+    this.init();
+    if (this.muted || !this.ctx) return;
+    try {
+      const master = this.getMasterGain();
+      const now = this.ctx.currentTime;
+      const baseFreq = 440; // A4
+      const scale = [1, 1.125, 1.25, 1.333, 1.5, 1.667, 1.875, 2.0];
+      const noteCount = Math.min(4, Math.max(1, streak));
+
+      for (let i = 0; i < noteCount; i++) {
+        const step = (streak + i) % scale.length;
+        const freq = baseFreq * scale[step];
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        const start = now + i * 0.06;
+
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, start);
+        gain.gain.setValueAtTime(0.25, start);
+        gain.gain.exponentialRampToValueAtTime(0.001, start + 0.18);
+
+        osc.connect(gain);
+        gain.connect(master);
+        osc.start(start);
+        osc.stop(start + 0.2);
+      }
+    } catch (e) {
+      console.warn('Audio playStreakCombo error', e);
+    }
+  }
+
+  // Clutch Defuse / Near Miss relief chime
+  playClutchDefuse() {
+    this.init();
+    if (this.muted || !this.ctx) return;
+    try {
+      const master = this.getMasterGain();
+      const now = this.ctx.currentTime;
+      // Dual high-energy triumphant chime
+      [1046.50, 1318.51, 1567.98, 2093.00].forEach((freq, idx) => {
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        const start = now + idx * 0.05;
+
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, start);
+        gain.gain.setValueAtTime(0.3, start);
+        gain.gain.exponentialRampToValueAtTime(0.001, start + 0.35);
+
+        osc.connect(gain);
+        gain.connect(master);
+        osc.start(start);
+        osc.stop(start + 0.38);
+      });
+    } catch (e) {
+      console.warn('Audio playClutchDefuse error', e);
+    }
+  }
+
+  // Chaos event warning siren
+  playChaosAlert() {
+    this.init();
+    if (this.muted || !this.ctx) return;
+    try {
+      const master = this.getMasterGain();
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(300, now);
+      osc.frequency.linearRampToValueAtTime(700, now + 0.15);
+      osc.frequency.linearRampToValueAtTime(350, now + 0.3);
+
+      gain.gain.setValueAtTime(0.25, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+
+      osc.connect(gain);
+      gain.connect(master);
+      osc.start(now);
+      osc.stop(now + 0.36);
+    } catch (e) {
+      console.warn('Audio playChaosAlert error', e);
+    }
+  }
 }
 
 export const soundEngine = new SoundEngine();

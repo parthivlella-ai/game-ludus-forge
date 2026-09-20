@@ -41,9 +41,7 @@ class Database {
       if (!fs.existsSync(DATA_DIR)) {
         fs.mkdirSync(DATA_DIR, { recursive: true });
       }
-      const tmpFile = `${DB_FILE}.tmp.${Date.now()}`;
-      fs.writeFileSync(tmpFile, JSON.stringify(this.memory, null, 2), 'utf-8');
-      fs.renameSync(tmpFile, DB_FILE);
+      fs.writeFileSync(DB_FILE, JSON.stringify(this.memory, null, 2), 'utf-8');
     } catch (err) {
       console.error('Failed to persist database to disk:', err);
     }
@@ -162,6 +160,47 @@ class Database {
     if (!username) return [];
     const gameplay = this.getGameplay(username);
     return gameplay.seenQuestionIds || [];
+  }
+
+  // ================= Authentic Leaderboard (Real Users Only) =================
+  getLeaderboard() {
+    const list = [];
+    for (const [key, user] of Object.entries(this.memory.users)) {
+      const gp = this.getGameplay(user.username) || {};
+      const completedCount = gp.completedLevels ? Object.keys(gp.completedLevels).length : 0;
+      list.push({
+        username: user.username,
+        displayName: user.displayName || user.username,
+        totalScore: gp.totalScore || 0,
+        bestScore: gp.bestScore || 0,
+        unlockedLevel: gp.unlockedLevel || 1,
+        highestStreak: (gp.stats && gp.stats.highestStreak) || 0,
+        completedCount
+      });
+    }
+
+    // Sort by totalScore descending, then by unlockedLevel descending
+    list.sort((a, b) => (b.totalScore - a.totalScore) || (b.unlockedLevel - a.unlockedLevel));
+    return list.slice(0, 50);
+  }
+
+  // ================= Daily Challenge Persistence =================
+  saveDailyCompletion(username, dateStr, score, reward = 100) {
+    if (!username || !dateStr) return null;
+    const gp = this.getGameplay(username);
+    if (!gp.dailyCompletions) gp.dailyCompletions = {};
+
+    gp.dailyCompletions[dateStr] = {
+      completed: true,
+      score: score || 0,
+      completedAt: new Date().toISOString()
+    };
+
+    gp.totalScore = (gp.totalScore || 0) + (score || 0);
+    gp.inkTokens = (gp.inkTokens || 0) + reward;
+    gp.updatedAt = new Date().toISOString();
+    this.persist();
+    return gp;
   }
 }
 

@@ -9,19 +9,20 @@ import { challengeEngine } from '../../services/challengeEngine.js';
 import { soundEngine } from '../../services/soundEngine.js';
 import { particleEngine } from '../../services/particleEngine.js';
 import { progressionManager } from '../../services/progressionManager.js';
-import { ArrowLeft, Pause, Play, Flame, Shield, CheckCircle, Sparkles } from 'lucide-react';
+import { ArrowLeft, Pause, Play, Flame, Shield, CheckCircle, Sparkles, Zap, AlertTriangle } from 'lucide-react';
 
 export default function GameArena({
-  level,
+  level = 1,
+  isDailyChallenge = false,
+  onDailyComplete,
   onExitToLevels,
   onOpenShop,
   onNextLevel
 }) {
-  // Number of questions required for this level:
-  // Easy (1-20): 3 questions
-  // Medium (21-40): 2 questions
-  // Hard (41-60): 1 question
-  const targetQuestions = level <= 20 ? 3 : level <= 40 ? 2 : 1;
+  // Number of questions required:
+  // Daily Challenge: exactly 3 (Easy -> Medium -> Hard)
+  // Normal Levels: Easy (1-20): 3 questions, Medium (21-40): 2 questions, Hard (41-60): 1 question
+  const targetQuestions = isDailyChallenge ? 3 : (level <= 20 ? 3 : level <= 40 ? 2 : 1);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(1);
 
   // Game session states
@@ -36,6 +37,9 @@ export default function GameArena({
   const [failureReason, setFailureReason] = useState(null);
   const [isExploding, setIsExploding] = useState(false);
   const [isTransitioningPhase, setIsTransitioningPhase] = useState(false);
+
+  // Chaos Event Modifier
+  const [activeChaosEvent, setActiveChaosEvent] = useState(null); // null | 'DOUBLE_SCORE' | 'TIME_CRUNCH' | 'SPEED_BLAST' | 'NO_POWERUPS'
 
   // Score & Round Tracking
   const [streak, setStreak] = useState(0);
@@ -54,6 +58,9 @@ export default function GameArena({
   // Player inventory
   const [inventory, setInventory] = useState(progressionManager.getState().inventory);
 
+  // Ref to track last countdown second beeped
+  const lastBeepSec = useRef(null);
+
   useEffect(() => {
     const unsub = progressionManager.subscribe((state) => {
       setInventory(state.inventory);
@@ -68,15 +75,42 @@ export default function GameArena({
     setLevelScore(0);
     setLevelInk(0);
     setHadFailuresInLevel(false);
-    loadNextChallenge(false);
-  }, [level]);
+    lastBeepSec.current = null;
+    loadNextChallenge(false, 1);
+  }, [level, isDailyChallenge]);
 
   // Load next challenge guaranteed not repeated
-  const loadNextChallenge = (isRetry = false) => {
-    const next = challengeEngine.getNextChallenge(level);
+  const loadNextChallenge = (isRetry = false, qIndex = currentQuestionIndex) => {
+    let targetLvl = level;
+    if (isDailyChallenge) {
+      // Stage 1: Easy (L5), Stage 2: Medium (L25), Stage 3: Hard (L45)
+      targetLvl = qIndex === 1 ? 5 : qIndex === 2 ? 25 : 45;
+    }
+
+    const next = challengeEngine.getNextChallenge(targetLvl);
     setChallenge(next);
-    setTimeLeft(next.baseTime || 15);
-    setMaxTime(next.baseTime || 15);
+
+    // Occasional Chaos Event Trigger (25% chance on level >= 5 or in Daily mode)
+    let chaos = null;
+    if (Math.random() < 0.25 || (level % 5 === 0 && !isDailyChallenge)) {
+      const events = ['DOUBLE_SCORE', 'TIME_CRUNCH', 'SPEED_BLAST', 'NO_POWERUPS'];
+      chaos = events[Math.floor(Math.random() * events.length)];
+      setActiveChaosEvent(chaos);
+      soundEngine.playChaosAlert();
+    } else {
+      setActiveChaosEvent(null);
+    }
+
+    let allocatedTime = next.baseTime || 15;
+    if (chaos === 'TIME_CRUNCH') {
+      allocatedTime = Math.max(8, allocatedTime - 4);
+    } else if (chaos === 'SPEED_BLAST') {
+      allocatedTime = 10;
+    }
+
+    setTimeLeft(allocatedTime);
+    setMaxTime(allocatedTime);
+    lastBeepSec.current = null;
     setIsFrozen(false);
     setShowHint(false);
     setInputFeedback(null);
@@ -87,7 +121,7 @@ export default function GameArena({
     setIsTransitioningPhase(false);
   };
 
-  // Timer Tick Engine (High precision delta time)
+  // Timer Tick Engine with Escalating Audio & Tension Beeps
   useEffect(() => {
     if (isPaused || isFrozen || showCompleteModal || showFailureModal || !challenge || isExploding || isTransitioningPhase) {
       return;
@@ -101,6 +135,16 @@ export default function GameArena({
 
       setTimeLeft((prev) => {
         const next = prev - delta;
+
+        // Urgent Countdown Beeps at 3, 2, 1
+        const wholeSec = Math.ceil(next);
+        if (wholeSec <= 3 && wholeSec >= 1 && lastBeepSec.current !== wholeSec) {
+          lastBeepSec.current = wholeSec;
+          soundEngine.playWarningBeep(wholeSec);
+          if (particleEngine) {
+            particleEngine.triggerScreenShake('light');
+          }
+        }
 
         if (next <= 0) {
           clearInterval(interval);
@@ -132,12 +176,41 @@ export default function GameArena({
     setInputFeedback('correct');
     setFailureReason(null);
 
-    const timeBonus = Math.round((timeLeft / maxTime) * 100);
-    const streakMultiplier = 1 + streak * 0.2;
-    const points = Math.round(((challenge.reward || 30) + timeBonus) * streakMultiplier);
-    const ink = 15 + Math.floor(streak * 2);
-
     const newStreak = streak + 1;
+    soundEngine.playStreakCombo(newStreak);
+
+    // Near-Miss Clutch Defusal Check
+    const isNearMiss = timeLeft <= 1.0;
+    const isClutch = timeLeft <= 0.5;
+    let nearMissBonus = 0;
+    if (isClutch) {
+      nearMissBonus = 50;
+      soundEngine.playClutchDefuse();
+      setFloatingAlert(`🔥 ${timeLeft.toFixed(1)}s CLUTCH DEFUSE! (+50 Bonus)`);
+    } else if (isNearMiss) {
+      nearMissBonus = 25;
+      soundEngine.playClutchDefuse();
+      setFloatingAlert(`😱 THAT WAS CLOSE! (+25 Near Miss Bonus)`);
+    }
+
+    // Score Calculations
+    const timeBonus = Math.round((timeLeft / maxTime) * 100);
+    let streakMultiplier = 1 + streak * 0.2;
+    // Chaos Overdrive milestone (streak >= 5)
+    const isChaosOverdrive = newStreak >= 5;
+    if (isChaosOverdrive) {
+      streakMultiplier *= 2;
+    }
+    if (activeChaosEvent === 'DOUBLE_SCORE') {
+      streakMultiplier *= 2;
+    }
+
+    let points = Math.round(((challenge.reward || 30) + timeBonus + nearMissBonus) * streakMultiplier);
+    let ink = 15 + Math.floor(streak * 2);
+    if (activeChaosEvent === 'SPEED_BLAST') {
+      ink += 25;
+    }
+
     const newScore = levelScore + points;
     const newInk = levelInk + ink;
 
@@ -148,42 +221,48 @@ export default function GameArena({
     progressionManager.recordAnswer(true, newStreak, timeLeft / maxTime);
     progressionManager.addInk(ink);
 
-    // Visual celebration sparks safely
+    // Visual celebration sparks
     try {
       if (typeof window !== 'undefined' && particleEngine) {
-        particleEngine.createSparkBurst(window.innerWidth / 2, window.innerHeight / 2 - 80, 40);
+        particleEngine.createSparkBurst(window.innerWidth / 2, window.innerHeight / 2 - 80, 45);
       }
     } catch (e) {
       console.warn(e);
     }
 
-    // Check if more questions remain for this level
+    // Check progression to next question in level or complete
     if (currentQuestionIndex < targetQuestions) {
-      // Step to next question in level!
       setIsTransitioningPhase(true);
-      setFloatingAlert(`✨ LOCK ${currentQuestionIndex} DISARMED! +${points} PTS`);
+      if (!isNearMiss && !isClutch) {
+        setFloatingAlert(`✨ LOCK ${currentQuestionIndex} DEFUSED! +${points} PTS`);
+      }
       setTimeout(() => setFloatingAlert(null), 1400);
 
       setTimeout(() => {
-        setCurrentQuestionIndex((prev) => prev + 1);
-        loadNextChallenge(false);
+        const nextQ = currentQuestionIndex + 1;
+        setCurrentQuestionIndex(nextQ);
+        loadNextChallenge(false, nextQ);
       }, 750);
     } else {
-      // All questions cleared for this level!
-      setFloatingAlert(`🏆 LEVEL ${level} CLEARED! +${newScore} PTS`);
-      setTimeout(() => setFloatingAlert(null), 2000);
+      // Level or Daily Challenge completed!
+      if (isDailyChallenge) {
+        setFloatingAlert(`🏆 DAILY CHAOS DEFUSED! +${newScore} PTS`);
+        progressionManager.completeDailyChallenge(null, newScore, 150);
+        if (onDailyComplete) onDailyComplete(newScore);
+        setTimeout(() => setShowCompleteModal(true), 900);
+      } else {
+        setFloatingAlert(`🏆 LEVEL ${level} CLEARED! +${newScore} PTS`);
+        setTimeout(() => setFloatingAlert(null), 2000);
 
-      const timeRatio = timeLeft / maxTime;
-      let stars = 1;
-      if (!hadFailuresInLevel) {
-        stars = timeRatio >= 0.3 ? 3 : 2;
+        const timeRatio = timeLeft / maxTime;
+        let stars = 1;
+        if (!hadFailuresInLevel) {
+          stars = timeRatio >= 0.3 ? 3 : 2;
+        }
+
+        progressionManager.completeLevel(level, newScore, stars);
+        setTimeout(() => setShowCompleteModal(true), 900);
       }
-
-      progressionManager.completeLevel(level, newScore, stars);
-
-      setTimeout(() => {
-        setShowCompleteModal(true);
-      }, 900);
     }
   };
 
@@ -201,22 +280,20 @@ export default function GameArena({
   };
 
   const handleTimeout = () => {
-    // Check if player has an active shield
     if (shieldActive) {
       setShieldActive(false);
       soundEngine.playShieldAbsorb();
-      setTimeLeft(maxTime * 0.5); // restore half time
-      setFloatingAlert('🛡️ SHIELD ABSORBED BLAST!');
+      setTimeLeft(maxTime * 0.5);
+      setFloatingAlert('🛡️ BLAST SHIELD ABSORBED EXPLOSION!');
       setTimeout(() => setFloatingAlert(null), 2000);
       return;
     }
 
-    // Explosion sequence!
     setIsExploding(true);
     soundEngine.playExplosion();
     try {
       if (typeof window !== 'undefined' && particleEngine) {
-        particleEngine.createExplosion(window.innerWidth / 2, window.innerHeight / 2 - 40, 90);
+        particleEngine.createExplosion(window.innerWidth / 2, window.innerHeight / 2 - 40, 95);
         particleEngine.triggerScreenShake('heavy');
       }
     } catch (e) {
@@ -228,8 +305,9 @@ export default function GameArena({
     progressionManager.recordAnswer(false, 0, 0);
     progressionManager.recordFailure();
 
-    // Mark challenge as failed in engine so it is NEVER repeated on retry
-    challengeEngine.markChallengeFailed(level, challenge.id);
+    if (challenge) {
+      challengeEngine.markChallengeFailed(level, challenge.id);
+    }
     setFailedChallengeRecap(challenge);
 
     setTimeout(() => {
@@ -240,7 +318,14 @@ export default function GameArena({
 
   // Power-up Usage Handler
   const handleUsePowerUp = (id) => {
-    if (isPaused || showCompleteModal || showFailureModal) return;
+    if (isPaused || showCompleteModal || showFailureModal || isExploding || isTransitioningPhase) return;
+
+    if (activeChaosEvent === 'NO_POWERUPS') {
+      soundEngine.playWrong();
+      setFloatingAlert('🚫 CHAOS EVENT: POWER-UPS DISABLED!');
+      setTimeout(() => setFloatingAlert(null), 1500);
+      return;
+    }
 
     if (!progressionManager.consumePowerUp(id)) return;
 
@@ -261,10 +346,9 @@ export default function GameArena({
       setTimeout(() => setFloatingAlert(null), 1500);
     } else if (id === 'shield') {
       setShieldActive(true);
-      setFloatingAlert('🛡️ SHIELD EQUIPPED!');
+      setFloatingAlert('🛡️ BLAST SHIELD EQUIPPED!');
       setTimeout(() => setFloatingAlert(null), 1500);
     } else if (id === 'potato') {
-      // Pass/Swap danger: re-rolls challenge immediately without penalty
       setFloatingAlert('🔥 HOT POTATO: BOMB SWAPPED!');
       loadNextChallenge(false);
       setTimeout(() => setFloatingAlert(null), 1500);
@@ -276,11 +360,15 @@ export default function GameArena({
     setCurrentQuestionIndex(1);
     setLevelScore(0);
     setLevelInk(0);
-    loadNextChallenge(true); // Loads guaranteed DIFFERENT challenge!
+    loadNextChallenge(true, 1);
   };
 
   const handleNextLevel = () => {
     soundEngine.playClick();
+    if (isDailyChallenge) {
+      if (onExitToLevels) onExitToLevels(level);
+      return;
+    }
     if (level < 60) {
       const nextLvl = level + 1;
       challengeEngine.resetLevelSession(nextLvl);
@@ -297,12 +385,20 @@ export default function GameArena({
   const handleExit = () => {
     soundEngine.playClick();
     challengeEngine.resetLevelSession(level);
-    if (onExitToLevels) {
-      onExitToLevels(level);
-    }
+    if (onExitToLevels) onExitToLevels(level);
   };
 
   const difficulty = challenge ? challenge.difficulty : (level <= 20 ? 'easy' : level <= 40 ? 'medium' : 'hard');
+
+  // Bomb Tension Level
+  const getTensionState = () => {
+    if (timeLeft <= 1.0) return { icon: '💣🔥🔥🔥', text: 'EXPLOSION IMMINENT!', color: '#ef4444' };
+    if (timeLeft <= 3.0) return { icon: '💣🔥🔥', text: 'CRITICAL DANGER', color: '#f97316' };
+    if (timeLeft <= 5.0) return { icon: '💣🔥', text: 'FUSE BURNING', color: '#f59e0b' };
+    return { icon: '💣', text: 'STABLE CORE', color: '#00f59b' };
+  };
+
+  const tension = getTensionState();
 
   return (
     <div className={`game-arena arena-${difficulty}`}>
@@ -317,10 +413,10 @@ export default function GameArena({
           <span>MAP</span>
         </button>
 
-        {/* Center: Question Progress Tracker */}
+        {/* Center: Stage Progress Tracker */}
         <div className="hud-question-tracker">
           <div className="tracker-label">
-            LEVEL {level} • {difficulty.toUpperCase()} ({targetQuestions} {targetQuestions === 1 ? 'QUESTION' : 'QUESTIONS'})
+            {isDailyChallenge ? '🔥 DAILY CHAOS' : `LEVEL ${level} • ${difficulty.toUpperCase()}`}
           </div>
           <div className="tracker-dots">
             {Array.from({ length: targetQuestions }).map((_, qIdx) => {
@@ -335,15 +431,15 @@ export default function GameArena({
                   {isCleared ? (
                     <>
                       <CheckCircle size={12} />
-                      <span>LOCK {qNum} DEFUSED</span>
+                      <span>{isDailyChallenge ? `STAGE ${qNum} DEFUSED` : `LOCK ${qNum} DEFUSED`}</span>
                     </>
                   ) : isCurrent ? (
                     <>
                       <span className="hud-dot-pulse" />
-                      <span>LOCK {qNum} (ACTIVE)</span>
+                      <span>{isDailyChallenge ? `STAGE ${qNum} (ACTIVE)` : `LOCK ${qNum} (ACTIVE)`}</span>
                     </>
                   ) : (
-                    <span>LOCK {qNum}</span>
+                    <span>{isDailyChallenge ? `STAGE ${qNum}` : `LOCK ${qNum}`}</span>
                   )}
                 </div>
               );
@@ -353,9 +449,10 @@ export default function GameArena({
 
         {/* Right HUD Stats */}
         <div className="hud-stats-group">
-          <div className="hud-pill streak" title="Current Streak">
-            <Flame size={14} />
-            <span>x{streak}</span>
+          {/* Streak Indicator with Chaos Overdrive badge */}
+          <div className={`hud-pill streak ${streak >= 5 ? 'chaos-overdrive' : ''}`} title="Current Streak Multiplier">
+            <Flame size={14} color={streak >= 5 ? '#ec4899' : '#f97316'} />
+            <span>x{streak} {streak >= 5 ? '⚡2X' : ''}</span>
           </div>
           <div className="hud-pill score" title="Score Earned">
             <span>🏆 {levelScore}</span>
@@ -373,6 +470,36 @@ export default function GameArena({
         </div>
       </header>
 
+      {/* Chaos Event Active Alert Banner */}
+      {activeChaosEvent && (
+        <div style={{
+          background: 'linear-gradient(90deg, rgba(236, 72, 153, 0.25), rgba(239, 68, 68, 0.25))',
+          border: '1px solid #ec4899',
+          borderRadius: '8px',
+          padding: '4px 12px',
+          margin: '0.4rem auto',
+          maxWidth: '500px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '0.5rem',
+          color: '#ffffff',
+          fontWeight: 800,
+          fontSize: '0.8rem',
+          letterSpacing: '0.04em',
+          animation: 'pulse 1.5s infinite'
+        }}>
+          <AlertTriangle size={15} color="#ec4899" />
+          <span>
+            ⚠️ CHAOS EVENT:{' '}
+            {activeChaosEvent === 'DOUBLE_SCORE' && 'DOUBLE SCORE (POINTS × 2)'}
+            {activeChaosEvent === 'TIME_CRUNCH' && 'TIME CRUNCH (-4s CLOCK)'}
+            {activeChaosEvent === 'SPEED_BLAST' && 'SPEED BLAST (+25 EXTRA INK)'}
+            {activeChaosEvent === 'NO_POWERUPS' && 'PURIST MODE (POWER-UPS DISABLED)'}
+          </span>
+        </div>
+      )}
+
       {/* Floating Alert Popups */}
       {floatingAlert && (
         <div className="arena-floating-alert">
@@ -380,6 +507,24 @@ export default function GameArena({
           <span>{floatingAlert}</span>
         </div>
       )}
+
+      {/* Tension Meter Pill */}
+      <div style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '0.4rem',
+        padding: '3px 12px',
+        borderRadius: '999px',
+        background: 'rgba(0, 0, 0, 0.4)',
+        border: `1px solid ${tension.color}`,
+        color: tension.color,
+        fontWeight: 800,
+        fontSize: '0.75rem',
+        margin: '0.2rem auto'
+      }}>
+        <span>{tension.icon}</span>
+        <span>{tension.text} ({timeLeft.toFixed(1)}s)</span>
+      </div>
 
       {/* Main Interactive Stage */}
       <main className="arena-stage">
@@ -421,7 +566,7 @@ export default function GameArena({
       {/* Modals */}
       <LevelCompleteModal
         isOpen={showCompleteModal}
-        level={level}
+        level={isDailyChallenge ? 'DAILY' : level}
         scoreEarned={levelScore}
         inkEarned={levelInk}
         streak={streak}
@@ -434,7 +579,7 @@ export default function GameArena({
           setLevelInk(0);
           setStreak(0);
           setHadFailuresInLevel(false);
-          loadNextChallenge(false);
+          loadNextChallenge(false, 1);
         }}
         onLevelSelect={handleExit}
       />
@@ -443,6 +588,12 @@ export default function GameArena({
         isOpen={showFailureModal}
         level={level}
         failedChallenge={failedChallengeRecap}
+        runStats={{
+          score: levelScore,
+          questionsCompleted: currentQuestionIndex - 1,
+          bestStreak: streak,
+          inkEarned: levelInk
+        }}
         onRetry={handleRetry}
         onLevelSelect={handleExit}
       />

@@ -8,6 +8,8 @@ import ShopModal from './components/Modals/ShopModal.jsx';
 import AchievementsModal from './components/Modals/AchievementsModal.jsx';
 import SettingsModal from './components/Modals/SettingsModal.jsx';
 import HowToPlayModal from './components/Modals/HowToPlayModal.jsx';
+import LeaderboardModal from './components/Modals/LeaderboardModal.jsx';
+import DailyChallengeModal from './components/Modals/DailyChallengeModal.jsx';
 import { authService } from './services/authService.js';
 import { progressionManager } from './services/progressionManager.js';
 import { particleEngine } from './services/particleEngine.js';
@@ -27,6 +29,7 @@ export default function App() {
   const [screen, setScreen] = useState('AUTH');
   const [selectedLevel, setSelectedLevel] = useState(1);
   const [targetZone, setTargetZone] = useState(() => getZoneForLevel(1));
+  const [isDailyActive, setIsDailyActive] = useState(false);
 
   // Player progression state
   const [playerState, setPlayerState] = useState(progressionManager.getState());
@@ -37,6 +40,8 @@ export default function App() {
   const [showAchievements, setShowAchievements] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showHowToPlay, setShowHowToPlay] = useState(false);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [showDailyModal, setShowDailyModal] = useState(false);
 
   // Canvas ref for particle visual engine
   const canvasRef = useRef(null);
@@ -78,20 +83,29 @@ export default function App() {
 
   const handleStartLevel = (lvl) => {
     setSelectedLevel(lvl);
+    setIsDailyActive(false);
     setTargetZone(getZoneForLevel(lvl));
     setScreen('GAME_ARENA');
   };
 
   const handleNextLevel = (nextLvl) => {
     setSelectedLevel(nextLvl);
+    setIsDailyActive(false);
     setTargetZone(getZoneForLevel(nextLvl));
     setScreen('GAME_ARENA');
   };
 
   const handleExitToLevels = (lvl) => {
     const activeLvl = lvl || selectedLevel;
+    setIsDailyActive(false);
     setTargetZone(getZoneForLevel(activeLvl));
     setScreen('LEVEL_SELECT');
+  };
+
+  const handleStartDailyChallenge = () => {
+    setShowDailyModal(false);
+    setIsDailyActive(true);
+    setScreen('GAME_ARENA');
   };
 
   // If user not authenticated, display the Auth / Welcome screen
@@ -113,7 +127,7 @@ export default function App() {
       <header className="top-nav">
         <div
           className="brand-badge"
-          onClick={() => { soundEngine.playClick(); setScreen('HOME'); }}
+          onClick={() => { soundEngine.playClick(); setIsDailyActive(false); setScreen('HOME'); }}
         >
           <span>💣 WORDBLAST</span>
         </div>
@@ -153,6 +167,9 @@ export default function App() {
             onOpenShop={() => setShowShop(true)}
             onOpenSettings={() => setShowSettings(true)}
             onOpenProfile={() => setShowProfile(true)}
+            onOpenLeaderboard={() => setShowLeaderboard(true)}
+            onOpenDailyChallenge={() => setShowDailyModal(true)}
+            isDailyCompleted={progressionManager.isDailyCompleted()}
           />
         )}
 
@@ -170,6 +187,10 @@ export default function App() {
         {screen === 'GAME_ARENA' && (
           <GameArena
             level={selectedLevel}
+            isDailyChallenge={isDailyActive}
+            onDailyComplete={(score) => {
+              setShowDailyModal(true);
+            }}
             onExitToLevels={handleExitToLevels}
             onNextLevel={handleNextLevel}
             onOpenShop={() => setShowShop(true)}
@@ -207,6 +228,20 @@ export default function App() {
       <HowToPlayModal
         isOpen={showHowToPlay}
         onClose={() => setShowHowToPlay(false)}
+      />
+
+      <LeaderboardModal
+        isOpen={showLeaderboard}
+        onClose={() => setShowLeaderboard(false)}
+        currentUsername={currentUser?.username}
+      />
+
+      <DailyChallengeModal
+        isOpen={showDailyModal}
+        onClose={() => setShowDailyModal(false)}
+        isCompleted={progressionManager.isDailyCompleted()}
+        dailyInfo={progressionManager.getDailyInfo()}
+        onStartDaily={handleStartDailyChallenge}
       />
     </div>
   );

@@ -160,6 +160,31 @@ app.post('/api/gameplay/:username/seen', (req, res) => {
   }
 });
 
+// Real Player Leaderboard (Authentic accounts only, no fake data)
+app.get('/api/leaderboard', (req, res) => {
+  try {
+    const leaderboard = db.getLeaderboard();
+    return res.json({ success: true, leaderboard });
+  } catch (err) {
+    console.error('Leaderboard error:', err);
+    return res.status(500).json({ success: false, error: 'Failed to load leaderboard' });
+  }
+});
+
+// Daily Challenge Completion
+app.post('/api/daily-challenge/:username/complete', (req, res) => {
+  try {
+    const { username } = req.params;
+    const { dateStr, score, reward } = req.body || {};
+    const date = dateStr || new Date().toISOString().slice(0, 10);
+    const updated = db.saveDailyCompletion(username, date, score, reward || 150);
+    return res.json({ success: true, gameplay: updated });
+  } catch (err) {
+    console.error('Daily challenge complete error:', err);
+    return res.status(500).json({ success: false, error: 'Failed to save daily challenge' });
+  }
+});
+
 // ================= STATIC FRONTEND SERVING (PRODUCTION) =================
 const distPath = path.join(__dirname, '../dist');
 if (fs.existsSync(distPath)) {
